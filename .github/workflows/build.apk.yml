@@ -42,19 +42,36 @@ jobs:
 
           unzip -q "${{ inputs.zip_path }}" -d project
 
-          echo "=== Project contents ==="
-          find project -maxdepth 2 -type f | head -100
+          echo "=== Extracted structure ==="
+          find project -maxdepth 3 -type f | head -100
 
-      - name: Detect Android project
+      - name: Detect Flutter project
+        id: detect_project
         run: |
-          echo "Searching for Gradle project..."
+          echo "Mencari pubspec.yaml..."
 
-          find project \
-            -name "gradlew" \
-            -o -name "build.gradle" \
-            -o -name "build.gradle.kts" \
-            -o -name "settings.gradle" \
-            -o -name "settings.gradle.kts"
+          PUBSPEC=$(find project -type f -name "pubspec.yaml" -print -quit)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "ERROR: pubspec.yaml tidak ditemukan."
+
+            echo ""
+            echo "Isi project:"
+            find project -maxdepth 4 -type f | head -200
+
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project ditemukan:"
+          echo "$PROJECT_DIR"
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "Isi project:"
+          ls -lah "$PROJECT_DIR"
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -67,31 +84,13 @@ jobs:
         with:
           channel: stable
 
-      - name: Check Flutter project
-        working-directory: project
-        run: |
-          echo "=== Current directory ==="
-          pwd
-
-          echo "=== Files ==="
-          ls -lah
-
-          if [ ! -f "pubspec.yaml" ]; then
-            echo "ERROR: pubspec.yaml tidak ditemukan."
-            echo ""
-            echo "Kemungkinan struktur ZIP memiliki folder tambahan."
-            echo "Contoh:"
-            echo "project/project/pubspec.yaml"
-            exit 1
-          fi
-
       - name: Flutter dependencies
-        working-directory: project
+        working-directory: ${{ steps.detect_project.outputs.project_dir }}
         run: |
           flutter pub get
 
       - name: Build APK
-        working-directory: project
+        working-directory: ${{ steps.detect_project.outputs.project_dir }}
         run: |
           flutter build apk --release
 
@@ -99,7 +98,7 @@ jobs:
         run: |
           echo "=== APK files ==="
 
-          find project \
+          find "${{ steps.detect_project.outputs.project_dir }}" \
             -type f \
             -name "*.apk" \
             -print
@@ -108,5 +107,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ inputs.build_id }}
-          path: project/build/app/outputs/flutter-apk/*.apk
+          path: ${{ steps.detect_project.outputs.project_dir }}/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
