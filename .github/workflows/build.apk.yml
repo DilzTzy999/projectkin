@@ -1,0 +1,86 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: "Unique build ID"
+        required: true
+        type: string
+      zip_path:
+        description: "Path of project ZIP"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Prepare workspace
+        env:
+          ZIP_PATH: ${{ inputs.zip_path }}
+        run: |
+          mkdir -p build-src
+          unzip -q "$ZIP_PATH" -d build-src
+
+      - name: Find Android project
+        id: project
+        run: |
+          GRADLEW=$(find build-src -type f -name "gradlew" -print -quit)
+
+          if [ -z "$GRADLEW" ]; then
+            echo "gradlew tidak ditemukan!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$GRADLEW")
+
+          echo "Project: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Make gradlew executable
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Find APK
+        run: |
+          APK=$(find "${{ steps.project.outputs.project_dir }}" \
+            -type f \
+            -path "*/build/outputs/apk/release/*.apk" \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "APK tidak ditemukan!"
+            exit 1
+          fi
+
+          echo "APK ditemukan: $APK"
+
+          mkdir -p output
+          cp "$APK" output/app-release.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ inputs.build_id }}
+          path: output/app-release.apk
+          retention-days: 1
