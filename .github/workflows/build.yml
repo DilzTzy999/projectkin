@@ -1,0 +1,122 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: "Unique build ID"
+        required: true
+        type: string
+
+      telegram_file_id:
+        description: "Telegram file_id"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq unzip curl
+
+      - name: Get Telegram file path
+        run: |
+          RESPONSE=$(curl -s \
+            "https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${{ inputs.telegram_file_id }}")
+
+          echo "$RESPONSE"
+
+          FILE_PATH=$(echo "$RESPONSE" | jq -r '.result.file_path')
+
+          if [ "$FILE_PATH" = "null" ]; then
+            echo "Gagal mendapatkan file_path."
+            exit 1
+          fi
+
+          echo "FILE_PATH=$FILE_PATH" >> "$GITHUB_ENV"
+
+      - name: Download ZIP from Telegram
+        run: |
+          curl -L \
+            "https://api.telegram.org/file/bot${BOT_TOKEN}/${FILE_PATH}" \
+            -o project.zip
+
+          ls -lh project.zip
+
+      - name: Extract project
+        run: |
+          rm -rf project
+          mkdir -p project
+
+          unzip -q project.zip -d project
+
+          echo "=== Extracted structure ==="
+
+          find project -maxdepth 3 -type f | head -100
+
+      - name: Detect Flutter project
+        id: detect_project
+        run: |
+          PUBSPEC=$(find project -type f -name "pubspec.yaml" -print -quit)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml tidak ditemukan."
+
+            find project -maxdepth 5 -type f | head -200
+
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: ${{ steps.detect_project.outputs.project_dir }}
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: ${{ steps.detect_project.outputs.project_dir }}
+        run: flutter build apk --release
+
+      - name: Find APK
+        run: |
+          find "${{ steps.detect_project.outputs.project_dir }}" \
+            -type f \
+            -name "*.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ inputs.build_id }}
+          path: ${{ steps.detect_project.outputs.project_dir }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
