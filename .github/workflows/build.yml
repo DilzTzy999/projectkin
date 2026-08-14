@@ -35,21 +35,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq unzip curl
 
-      - name: Get Telegram file path
-        run: |
-          RESPONSE=$(curl -s \
-            "https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${{ inputs.telegram_file_id }}")
+      - - name: Get Telegram file path
+  env:
+    BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+  run: |
+    echo "Panjang token: ${#BOT_TOKEN}"
 
-          echo "$RESPONSE"
+    FILE_ID="${{ inputs.telegram_file_id }}"
 
-          FILE_PATH=$(echo "$RESPONSE" | jq -r '.result.file_path')
+    echo "FILE_ID:"
+    echo "$FILE_ID"
 
-          if [ "$FILE_PATH" = "null" ]; then
-            echo "Gagal mendapatkan file_path."
-            exit 1
-          fi
+    RESPONSE=$(curl -s \
+      "https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${FILE_ID}")
 
-          echo "FILE_PATH=$FILE_PATH" >> "$GITHUB_ENV"
+    echo "RESPONSE:"
+    echo "$RESPONSE"
+
+    FILE_PATH=$(echo "$RESPONSE" | jq -r '.result.file_path')
+
+    if [ -z "$FILE_PATH" ] || [ "$FILE_PATH" = "null" ]; then
+      echo "Gagal mendapatkan file_path."
+      exit 1
+    fi
+
+    echo "FILE_PATH=$FILE_PATH" >> "$GITHUB_ENV"
 
       - name: Download ZIP from Telegram
         run: |
